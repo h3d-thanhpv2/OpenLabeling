@@ -1,6 +1,5 @@
 #!/bin/python
 import argparse
-import glob
 import json
 import os
 import re
@@ -11,6 +10,8 @@ from tqdm import tqdm
 
 from lxml import etree
 import xml.etree.cElementTree as ET
+
+from inkml_helper import InkMLHelper
 
 
 DELAY = 20 # keyboard delay (in milliseconds)
@@ -24,6 +25,7 @@ except cv2.error:
 cv2.destroyAllWindows()
 
 
+parser = argparse.ArgumentParser(description='Open-source image labeling tool')
 parser = argparse.ArgumentParser(description='Open-source image labeling tool')
 parser.add_argument('-i', '--input_dir', default='input', type=str, help='Path to input directory')
 parser.add_argument('-o', '--output_dir', default='output', type=str, help='Path to output directory')
@@ -612,6 +614,31 @@ def natural_sort_key(s, _nsre=re.compile('([0-9]+)')):
             for text in _nsre.split(s)]
 
 
+def convert_inkfile_to_images(inkfile_path, desired_img_format):
+    file_path, file_extension = os.path.splitext(inkfile_path)
+    file_extension = file_extension.replace('.', '_')
+    file_path += file_extension
+    ext = os.path.basename(file_path)
+    if not os.path.exists(file_path):
+        print(' Converting inkml\'s data to individual lines...')
+        lines_data = InkMLHelper.parse_ink(inkfile_path)[1]
+        lines = InkMLHelper.draw_trace_group(lines_data)
+        os.makedirs(file_path)
+        for i in tqdm(range(len(lines))):
+            line_text, line_img = lines[i]
+            # height, width = line_img.shape
+
+            line_name = '{}_{}{}'.format(
+                ext,
+                i,
+                desired_img_format
+            )
+            line_path = os.path.join(file_path, line_name)
+            cv2.imwrite(line_path, line_img)
+
+    return file_path, ext
+
+
 def convert_video_to_images(video_path, n_frames, desired_img_format):
     # create folder to store images (if video was not converted to images already)
     file_path, file_extension = os.path.splitext(video_path)
@@ -893,24 +920,37 @@ for f in sorted(os.listdir(INPUT_DIR), key = natural_sort_key):
     if test_img is not None:
         IMAGE_PATH_LIST.append(f_path)
     else:
-        # test if it is a video
-        test_video_cap = cv2.VideoCapture(f_path)
-        n_frames = int(test_video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
-        test_video_cap.release()
-        if n_frames > 0:
-            # it is a video
+
+        if f_path.endswith('inkml'):
             desired_img_format = '.jpg'
-            video_frames_path, video_name_ext = convert_video_to_images(f_path, n_frames, desired_img_format)
-            # add video frames to image list
-            frame_list = sorted(os.listdir(video_frames_path), key = natural_sort_key)
-            ## store information about those frames
+            lines_path, ext = convert_inkfile_to_images(f_path, desired_img_format)
+            lines_list = sorted(os.listdir(lines_path), key=natural_sort_key)
             first_index = len(IMAGE_PATH_LIST)
-            last_index = first_index + len(frame_list) # exclusive
+            last_index = first_index + len(lines_list)
             indexes_dict = {}
             indexes_dict['first_index'] = first_index
             indexes_dict['last_index'] = last_index
-            VIDEO_NAME_DICT[video_name_ext] = indexes_dict
-            IMAGE_PATH_LIST.extend((os.path.join(video_frames_path, frame) for frame in frame_list))
+            VIDEO_NAME_DICT[ext] = indexes_dict
+            IMAGE_PATH_LIST.extend((os.path.join(lines_path, line) for line in lines_list))
+        else:
+            # test if it is a video
+            test_video_cap = cv2.VideoCapture(f_path)
+            n_frames = int(test_video_cap.get(cv2.CAP_PROP_FRAME_COUNT))
+            test_video_cap.release()
+            if n_frames > 0:
+                # it is a video
+                desired_img_format = '.jpg'
+                video_frames_path, video_name_ext = convert_video_to_images(f_path, n_frames, desired_img_format)
+                # add video frames to image list
+                frame_list = sorted(os.listdir(video_frames_path), key = natural_sort_key)
+                ## store information about those frames
+                first_index = len(IMAGE_PATH_LIST)
+                last_index = first_index + len(frame_list) # exclusive
+                indexes_dict = {}
+                indexes_dict['first_index'] = first_index
+                indexes_dict['last_index'] = last_index
+                VIDEO_NAME_DICT[video_name_ext] = indexes_dict
+                IMAGE_PATH_LIST.extend((os.path.join(video_frames_path, frame) for frame in frame_list))
 last_img_index = len(IMAGE_PATH_LIST) - 1
 
 # create output directories
